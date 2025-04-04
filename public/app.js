@@ -134,70 +134,50 @@ document.addEventListener('DOMContentLoaded', function() {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
             
-            // If in edit mode, handle differently
-            if (editMode && editingEventId) {
-                // Parse the text to get updated event details
-                const response = await fetch('/api/parse', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ text }),
-                    signal: controller.signal
-                });
-                
-                clearTimeout(timeoutId);
-                
-                const data = await response.json();
-                
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to parse event details');
-                }
-                
-                if (data.success && data.eventDetails) {
-                    // Update the event
-                    await updateEvent(editingEventId, data.eventDetails);
-                    
-                    // Reset edit mode
-                    editMode = false;
-                    editingEventId = null;
-                    
-                    // Reset button text
-                    parseButton.textContent = 'Create Event';
-                    
-                    // Clear the text area
-                    eventTextArea.value = '';
-                    
-                    // Show success message
-                    showNotification('Event updated successfully!');
+            // Call the parse endpoint
+            const response = await fetch('/api/parse', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ text }),
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to parse input');
+            }
+            
+            // Hide loading indicator
+            loadingIndicator.style.display = 'none';
+            
+            // Check if it's multiple operations or a single event
+            if (data.multi_operations) {
+                // It's multiple operations
+                if (data.results) {
+                    // Operations were executed
+                    displayOperationResults(data.results);
                     
                     // Refresh events
                     await fetchEvents();
+                    
+                    // Clear the input
+                    eventTextArea.value = '';
                 } else {
-                    showError('Could not extract event details from the text');
+                    // Operations were detected but not executed (needs auth)
+                    if (confirm('Multiple operations detected. You need to connect to Google Calendar first. Would you like to do that now?')) {
+                        initiateAuth();
+                        return;
+                    } else {
+                        throw new Error('Authentication required for calendar operations');
+                    }
                 }
             } else {
-                // Regular event creation flow
-                const response = await fetch('/api/parse', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ text }),
-                    signal: controller.signal
-                });
-                
-                clearTimeout(timeoutId);
-                
-                const data = await response.json();
-                
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to parse event details');
-                }
-                
-                // Hide loading indicator
-                loadingIndicator.style.display = 'none';
-                
+                // It's a single event - use existing flow
                 if (data.success && data.eventDetails) {
                     displayEventDetails(data.eventDetails);
                 } else {
@@ -205,19 +185,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
         } catch (error) {
-            console.error('Error:', error);
-            
-            // Handle timeout or network errors
-            if (error.name === 'AbortError') {
-                showError('Request timed out. The OpenAI API may be unavailable.');
-                
-                // Offer manual entry option
-                if (confirm('Would you like to enter event details manually instead?')) {
-                    showManualEntryForm();
-                }
-            } else {
-                showError(error.message || 'An error occurred while processing your request');
-            }
+            console.error('Error parsing event:', error);
+            showError(error.message || 'An error occurred while parsing the event');
         } finally {
             loadingIndicator.style.display = 'none';
             parseButton.disabled = false;
@@ -891,6 +860,75 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (error) {
             console.error('Error deleting event:', error);
             showError(error.message || 'An error occurred while deleting the event');
+        }
+    }
+    
+    // Function to display operation results
+    function displayOperationResults(results) {
+        // Create a results container if it doesn't exist
+        let resultsContainer = document.getElementById('operationsResults');
+        if (!resultsContainer) {
+            resultsContainer = document.createElement('div');
+            resultsContainer.id = 'operationsResults';
+            resultsContainer.className = 'operations-results';
+            resultsContainer.style.marginTop = '20px';
+            resultsContainer.style.padding = '15px';
+            resultsContainer.style.backgroundColor = '#f5f5f5';
+            resultsContainer.style.borderRadius = '4px';
+            document.querySelector('.container').appendChild(resultsContainer);
+        }
+        
+        // Clear previous results
+        resultsContainer.innerHTML = '<h3>Operation Results</h3>';
+        
+        // Add each result
+        results.forEach((result, index) => {
+            const resultElement = document.createElement('div');
+            resultElement.style.margin = '10px 0';
+            resultElement.style.padding = '10px';
+            resultElement.style.border = '1px solid #ddd';
+            resultElement.style.borderRadius = '4px';
+            resultElement.style.backgroundColor = result.result.success ? '#f0fff0' : '#fff0f0';
+            
+            resultElement.innerHTML = `
+                <p><strong>Operation ${index + 1}:</strong> ${capitalizeFirstLetter(result.operation_type)}</p>
+                ${result.result.success 
+                    ? `<p>✅ Success: ${getSuccessMessage(result)}</p>` 
+                    : `<p>❌ Error: ${result.result.error || 'Unknown error'}</p>`}
+            `;
+            
+            resultsContainer.appendChild(resultElement);
+        });
+        
+        // Show the results container
+        resultsContainer.style.display = 'block';
+        
+        // Scroll to results
+        resultsContainer.scrollIntoView({ behavior: 'smooth' });
+        
+        // Show overall success notification
+        const successCount = results.filter(r => r.result.success).length;
+        showNotification(`Completed ${successCount} of ${results.length} operations successfully`);
+    }
+    
+    // Helper function to capitalize first letter
+    function capitalizeFirstLetter(string) {
+        return string.charAt(0).toUpperCase() + string.slice(1);
+    }
+    
+    // Helper function to get success message
+    function getSuccessMessage(result) {
+        switch (result.operation_type) {
+            case 'create':
+                return `Created event "${result.result.event.title}"`;
+            case 'read':
+                return `Found ${result.result.events.length} matching events`;
+            case 'update':
+                return `Updated event "${result.result.event.title}"`;
+            case 'delete':
+                return 'Event deleted successfully';
+            default:
+                return 'Operation completed successfully';
         }
     }
     

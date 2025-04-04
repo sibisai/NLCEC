@@ -84,7 +84,7 @@ class GoogleCalendarService {
       // Format start and end times
       const startDateTime = this._formatDateTime(eventData.date, eventData.start_time);
       let endDateTime;
-
+      
       if (eventData.end_time) {
         endDateTime = this._formatDateTime(eventData.date, eventData.end_time);
       } else {
@@ -93,32 +93,32 @@ class GoogleCalendarService {
         const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
         endDateTime = endDate.toISOString();
       }
-
+      
+      // Validate and format attendees
+      const validAttendees = eventData.attendees 
+        ? eventData.attendees
+            .filter(email => {
+              // Basic email validation
+              const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+              return emailRegex.test(email);
+            })
+            .map(email => ({ email }))
+        : [];
+      
       // Create event resource
       const event = {
         summary: eventData.title,
         location: eventData.location || '',
-        description: eventData.notes || 'Created with Natural Language Calendar App',
+        description: 'Created with Natural Language Calendar App',
         start: {
           dateTime: startDateTime,
-          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, // Use local timezone
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
         },
         end: {
           dateTime: endDateTime,
-          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, // Use local timezone
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
         },
-        attendees: eventData.attendees 
-          ? eventData.attendees
-              .filter(email => {
-                // Basic email validation
-                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                return emailRegex.test(email);
-              })
-              .map(email => ({ email }))
-          : [],
-        reminders: {
-          useDefault: true,
-        },
+        attendees: validAttendees
       };
       
       // Insert event
@@ -136,7 +136,7 @@ class GoogleCalendarService {
           startTime: eventData.start_time,
           endTime: eventData.end_time,
           location: response.data.location,
-          attendees: eventData.attendees || [],
+          attendees: validAttendees.map(a => a.email),
           htmlLink: response.data.htmlLink
         }
       };

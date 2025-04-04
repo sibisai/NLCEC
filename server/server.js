@@ -42,41 +42,44 @@ app.post('/api/parse', async (req, res) => {
       return res.status(400).json({ error: 'No text provided' });
     }
     
-    // Get current date and time information
+    // Get current date and time information with proper timezone handling
     const now = new Date();
-
-    const dateFormatter = new Intl.DateTimeFormat('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
     
-    const formattedDate = dateFormatter.format(now);
     // Get today's date in YYYY-MM-DD format in local timezone
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const todayISO = today.toISOString().split('T')[0];
+
     // Get tomorrow's date
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowISO = tomorrow.toISOString().split('T')[0];
+    
+    // Format date in local timezone
+    const dateFormatter = new Intl.DateTimeFormat('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      timeZone: 'UTC'
+    });
+    
+    const formattedDate = dateFormatter.format(now);
     
     // Get current time in HH:MM format
     const hours = String(now.getHours()).padStart(2, '0');
     const minutes = String(now.getMinutes()).padStart(2, '0');
     const currentTime = `${hours}:${minutes}`;
     
-    // Call OpenAI API to extract event details
+    // Call OpenAI API with enhanced prompt that explicitly handles dates
     const response = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
-        model: 'gpt-4o-mini',
+        model: 'gpt-4',
         messages: [
           {
-           // Update the system content
             role: 'system',
             content: `Extract calendar event details from the following text. 
-            Today's date is ${formattedDate} (${todayISO}).
+            Today's date is ${formattedDate} (${todayISO}) .
             Tomorrow's date is ${tomorrowISO}.
             The current time is ${currentTime}.
 
@@ -101,7 +104,7 @@ app.post('/api/parse', async (req, res) => {
           }
         ],
         temperature: 0.3,
-        max_tokens: 150
+        max_tokens: 300
       },
       {
         headers: {
@@ -111,23 +114,23 @@ app.post('/api/parse', async (req, res) => {
       }
     );
     
-    // Extract the JSON content from the response
+    // Extract the JSON content
     const content = response.data.choices[0].message.content.trim();
-    
+    let eventDetails;
     try {
-      const eventDetails = JSON.parse(content);
-      res.json({ success: true, eventDetails });
+      eventDetails = JSON.parse(content);
     } catch (parseError) {
       console.error('Error parsing OpenAI response:', parseError);
       // Attempt to extract JSON-like content from the response
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        const eventDetails = JSON.parse(jsonMatch[0]);
-        res.json({ success: true, eventDetails });
+        eventDetails = JSON.parse(jsonMatch[0]);
       } else {
         throw new Error('Failed to parse event details from response');
       }
     }
+    
+    res.json({ success: true, eventDetails });
   } catch (error) {
     console.error('Error calling OpenAI API:', error.message);
     if (error.response) {
@@ -257,6 +260,162 @@ app.delete('/api/calendar/events/:id', isAuthenticated, async (req, res) => {
     res.status(500).json({ error: 'Failed to delete event' });
   }
 });
+
+// Create operation handler
+async function handleCreateOperation(userId, eventData) {
+  try {
+    // Validate event data
+    if (!eventData.title || (!eventData.date && !eventData.start_time)) {
+      return { success: false, error: 'Invalid event data: Title and either date or time are required' };
+    }
+    
+    // Use your existing Google Calendar service to create the event
+    return await googleCalendarService.createEvent(userId, eventData);
+  } catch (error) {
+    console.error('Error in create operation:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Read operation handler
+async function handleReadOperation(userId, query) {
+  try {
+    // Check for relative dates
+    let options = {};
+    if (query.toLowerCase().includes('tomorrow')) {
+      options.relativeDate = true;
+    } else {
+      // Extract date from query if present
+      const dateMatch = query.match(/(\d{4}-\d{2}-\d{2})/);
+      if (dateMatch) {
+        options.date = dateMatch[1];
+      }
+    }
+    
+    // Get events with appropriate filter
+    const allEvents = await googleCalendarService.getEvents(userId, options);
+    
+    if (!allEvents.success) {
+      return allEvents;
+    }
+    
+    // If no query provided, return all events
+    if (!query || query.trim() === '') {
+      return { success: true, events: allEvents.events };
+    }
+    
+    // Normalize the query for case-insensitive search
+    const searchTerms = query.toLowerCase()
+      .replace(/\d{4}-\d{2}-\d{2}/g, '') // Remove date from search terms
+      .replace(/tomorrow/g, '') // Remove relative date terms
+      .split(' ')
+      .filter(term => term.length > 0); // Remove empty terms
+    
+    // If no search terms left after removing date, return all events for that date
+    if (searchTerms.length === 0) {
+      return { success: true, events: allEvents.events };
+    }
+    
+    // Filter events based on remaining search terms
+    const filteredEvents = allEvents.events.filter(event => {
+      // Create a searchable string from all event properties
+      const searchableText = [
+        event.title,
+        event.location,
+        event.startTime,
+        event.endTime,
+        ...(event.attendees || [])
+      ].join(' ').toLowerCase();
+      
+      // Check if all search terms are present in the event
+      return searchTerms.every(term => searchableText.includes(term));
+    });
+    
+    return { success: true, events: filteredEvents };
+  } catch (error) {
+    console.error('Error in read operation:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Update operation handler
+async function handleUpdateOperation(userId, query, updateData) {
+  try {
+    // First find the event
+    const searchResult = await handleReadOperation(userId, query);
+    
+    if (!searchResult.success) {
+      return searchResult;
+    }
+    
+    if (searchResult.events.length === 0) {
+      return { success: false, error: 'No matching events found' };
+    }
+    
+    // If multiple matches, update the first one
+    const eventToUpdate = searchResult.events[0];
+    
+    // Merge existing data with update data
+    const mergedData = {
+      ...eventToUpdate,
+      ...updateData,
+      // Convert property names
+      start_time: updateData.start_time || eventToUpdate.startTime,
+      end_time: updateData.end_time || eventToUpdate.endTime
+    };
+    
+    return await googleCalendarService.updateEvent(userId, eventToUpdate.id, mergedData);
+  } catch (error) {
+    console.error('Error in update operation:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Delete operation handler
+async function handleDeleteOperation(userId, query) {
+  try {
+    // First find the event
+    const searchResult = await handleReadOperation(userId, query);
+    
+    if (!searchResult.success) {
+      return searchResult;
+    }
+    
+    if (searchResult.events.length === 0) {
+      return { 
+        success: false, 
+        error: `No events found matching "${query}". Try being more specific with the event title, date, or time.` 
+      };
+    }
+    
+    // If multiple matches, show the matches to help user be more specific
+    if (searchResult.events.length > 1) {
+      const eventTitles = searchResult.events.map(e => `"${e.title}" on ${e.date}`).join(', ');
+      return { 
+        success: false, 
+        error: `Multiple events found matching "${query}": ${eventTitles}. Please be more specific with the event details.` 
+      };
+    }
+    
+    // Single match found, proceed with deletion
+    const eventToDelete = searchResult.events[0];
+    const deleteResult = await googleCalendarService.deleteEvent(userId, eventToDelete.id);
+    
+    if (deleteResult.success) {
+      return { 
+        success: true, 
+        event: eventToDelete,
+        message: `Successfully deleted event "${eventToDelete.title}"` 
+      };
+    }
+    
+    return deleteResult;
+  } catch (error) {
+    console.error('Error in delete operation:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 
 // Start the server
 app.listen(PORT, () => {
