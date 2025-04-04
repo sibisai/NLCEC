@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const resultContainer = document.getElementById('resultContainer');
     const confirmButton = document.getElementById('confirmButton');
     const editButton = document.getElementById('editButton');
+    const authButton = document.getElementById('authButton');
     
     // Event detail elements
     const eventTitle = document.getElementById('eventTitle');
@@ -39,6 +40,60 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('filterAll').addEventListener('click', () => applyFilter('all'));
     document.getElementById('filterToday').addEventListener('click', () => applyFilter('today'));
     document.getElementById('filterWeek').addEventListener('click', () => applyFilter('week'));
+    
+    // Add event listener for auth button
+    if (authButton) {
+        authButton.addEventListener('click', initiateAuth);
+    }
+    
+    // Check authentication status on page load
+    checkAuthStatus();
+    
+    // Function to check authentication status
+    async function checkAuthStatus() {
+        try {
+            const response = await fetch('/api/auth/status');
+            const data = await response.json();
+            
+            if (data.isAuthenticated) {
+                // User is authenticated, hide auth button and show app
+                if (authButton) {
+                    authButton.style.display = 'none';
+                }
+                document.getElementById('appContainer').style.display = 'block';
+                
+                // Fetch events
+                fetchEvents();
+            } else {
+                // User is not authenticated, show auth button and hide app
+                if (authButton) {
+                    authButton.style.display = 'block';
+                }
+                document.getElementById('appContainer').style.display = 'none';
+            }
+        } catch (error) {
+            console.error('Error checking auth status:', error);
+            showError('Failed to check authentication status');
+        }
+    }
+    
+    // Function to initiate Google authentication
+    async function initiateAuth() {
+        try {
+            const response = await fetch('/api/auth/google');
+            const data = await response.json();
+            
+            if (data.authUrl) {
+                // Redirect to Google's auth page
+                window.location.href = data.authUrl;
+            } else {
+                showError('Failed to get authentication URL');
+            }
+        } catch (error) {
+            console.error('Error initiating auth:', error);
+            showError('Failed to initiate authentication');
+        }
+    }
     
     // Function to handle parsing the event text
     async function handleParseEvent() {
@@ -304,6 +359,21 @@ document.addEventListener('DOMContentLoaded', function() {
             confirmButton.disabled = true;
             confirmButton.textContent = 'Creating event...';
             
+            // Check if user is authenticated
+            const authResponse = await fetch('/api/auth/status');
+            const authData = await authResponse.json();
+            
+            if (!authData.isAuthenticated) {
+                // User is not authenticated, prompt to authenticate
+                if (confirm('You need to connect to Google Calendar first. Would you like to do that now?')) {
+                    initiateAuth();
+                    return;
+                } else {
+                    throw new Error('Authentication required to create calendar events');
+                }
+            }
+            
+            // User is authenticated, create the event
             const response = await fetch('/api/calendar/create', {
                 method: 'POST',
                 headers: {
@@ -315,6 +385,16 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = await response.json();
             
             if (!response.ok) {
+                // Check if authentication error
+                if (response.status === 401) {
+                    // Authentication expired, prompt to re-authenticate
+                    if (confirm('Your session has expired. Would you like to reconnect to Google Calendar?')) {
+                        initiateAuth();
+                        return;
+                    } else {
+                        throw new Error('Authentication required to create calendar events');
+                    }
+                }
                 throw new Error(data.error || 'Failed to create calendar event');
             }
             
@@ -453,7 +533,29 @@ document.addEventListener('DOMContentLoaded', function() {
     // Function to fetch and display events
     async function fetchEvents() {
         try {
+            // Check if user is authenticated
+            const authResponse = await fetch('/api/auth/status');
+            const authData = await authResponse.json();
+            
+            if (!authData.isAuthenticated) {
+                // User is not authenticated, don't try to fetch events
+                document.getElementById('calendarView').style.display = 'none';
+                return;
+            }
+            
             const response = await fetch('/api/calendar/events');
+            
+            // Check if authentication error
+            if (response.status === 401) {
+                // Authentication expired, prompt to re-authenticate
+                if (confirm('Your session has expired. Would you like to reconnect to Google Calendar?')) {
+                    initiateAuth();
+                    return;
+                } else {
+                    throw new Error('Authentication required to view calendar events');
+                }
+            }
+            
             const data = await response.json();
             
             if (!response.ok) {
@@ -462,11 +564,15 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Store all events
             allEvents.length = 0; // Clear array
-            allEvents.push(...data.events);
-            
-            // Apply current filter
-            const filteredEvents = filterEvents(data.events, currentFilter);
-            displayFilteredEvents(filteredEvents);
+            if (data.success && data.events) {
+                allEvents.push(...data.events);
+                
+                // Apply current filter
+                const filteredEvents = filterEvents(data.events, currentFilter);
+                displayFilteredEvents(filteredEvents);
+            } else {
+                showError('No events found');
+            }
         } catch (error) {
             console.error('Error fetching events:', error);
             showError('Failed to load calendar events');
@@ -616,6 +722,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     <button class="edit-btn" data-event-id="${event.id}" style="background-color: #4CAF50; margin-right: 10px;">Edit Event</button>
                     <button class="delete-btn" data-event-id="${event.id}" style="background-color: #ff6b6b;">Delete Event</button>
                 </div>
+                ${event.htmlLink ? `<div style="margin-top: 10px;">
+                    <a href="${event.htmlLink}" target="_blank" style="color: #4285F4; text-decoration: none;">View in Google Calendar</a>
+                </div>` : ''}
             `;
             
             eventsListElement.appendChild(eventElement);
@@ -690,6 +799,20 @@ document.addEventListener('DOMContentLoaded', function() {
     // Function to update an event
     async function updateEvent(eventId, eventDetails) {
         try {
+            // Check if user is authenticated
+            const authResponse = await fetch('/api/auth/status');
+            const authData = await authResponse.json();
+            
+            if (!authData.isAuthenticated) {
+                // User is not authenticated, prompt to authenticate
+                if (confirm('You need to connect to Google Calendar first. Would you like to do that now?')) {
+                    initiateAuth();
+                    return false;
+                } else {
+                    throw new Error('Authentication required to update calendar events');
+                }
+            }
+            
             const response = await fetch(`/api/calendar/events/${eventId}`, {
                 method: 'PUT',
                 headers: {
@@ -697,6 +820,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 },
                 body: JSON.stringify(eventDetails)
             });
+            
+            // Check if authentication error
+            if (response.status === 401) {
+                // Authentication expired, prompt to re-authenticate
+                if (confirm('Your session has expired. Would you like to reconnect to Google Calendar?')) {
+                    initiateAuth();
+                    return false;
+                } else {
+                    throw new Error('Authentication required to update calendar events');
+                }
+            }
             
             if (!response.ok) {
                 const data = await response.json();
@@ -714,9 +848,34 @@ document.addEventListener('DOMContentLoaded', function() {
     // Function to delete an event
     async function deleteEvent(eventId) {
         try {
+            // Check if user is authenticated
+            const authResponse = await fetch('/api/auth/status');
+            const authData = await authResponse.json();
+            
+            if (!authData.isAuthenticated) {
+                // User is not authenticated, prompt to authenticate
+                if (confirm('You need to connect to Google Calendar first. Would you like to do that now?')) {
+                    initiateAuth();
+                    return;
+                } else {
+                    throw new Error('Authentication required to delete calendar events');
+                }
+            }
+            
             const response = await fetch(`/api/calendar/events/${eventId}`, {
                 method: 'DELETE'
             });
+            
+            // Check if authentication error
+            if (response.status === 401) {
+                // Authentication expired, prompt to re-authenticate
+                if (confirm('Your session has expired. Would you like to reconnect to Google Calendar?')) {
+                    initiateAuth();
+                    return;
+                } else {
+                    throw new Error('Authentication required to delete calendar events');
+                }
+            }
             
             if (!response.ok) {
                 const data = await response.json();
@@ -779,6 +938,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // Trigger resize event on load to apply correct styles
     window.dispatchEvent(new Event('resize'));
     
-    // Fetch events on page load
-    fetchEvents();
+    // Check auth status and fetch events on page load
+    checkAuthStatus();
 });

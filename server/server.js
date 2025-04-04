@@ -1,57 +1,65 @@
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
-const axios = require('axios');
 const path = require('path');
+const axios = require('axios');
+const session = require('express-session');
+const crypto = require('crypto');
+
+// Import calendar service
+const googleCalendarService = require('./google-calendar-service');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
+// Session middleware for storing user data
+app.use(session({
+  secret: crypto.randomBytes(64).toString('hex'),
+  resave: false,
+  saveUninitialized: true,
+  cookie: { secure: false } // Set to true in production with HTTPS
+}));
+
+// Middleware to parse JSON bodies
 app.use(express.json());
+
+// Serve static files from the public directory
 app.use(express.static(path.join(__dirname, '../public')));
 
-// Import the mock calendar service
-const mockCalendarService = require('./mock-calendar-service');
+// Check if user is authenticated
+const isAuthenticated = (req, res, next) => {
+  if (req.session.userId && req.session.isAuthenticated) {
+    return next();
+  }
+  res.status(401).json({ error: 'Not authenticated', authUrl: '/api/auth/google' });
+};
 
-// OpenAI API integration
-async function extractEventDetails(text) {
+// API endpoint to parse natural language input
+app.post('/api/parse', async (req, res) => {
   try {
-    // Get current date and time information with proper timezone handling
-    const now = new Date();
+    const { text } = req.body;
     
-    // Format date in local timezone
+    if (!text) {
+      return res.status(400).json({ error: 'No text provided' });
+    }
+    
+    // Get current date and time information
+    const now = new Date();
     const dateFormatter = new Intl.DateTimeFormat('en-US', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
-      day: 'numeric',
-      timeZone: 'America/Los_Angeles' // Set to Pacific timezone
+      day: 'numeric'
     });
     
     const formattedDate = dateFormatter.format(now);
-    
-    // Get YYYY-MM-DD format in local timezone
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const isoDate = `${year}-${month}-${day}`;
+    const isoDate = now.toISOString().split('T')[0];
     
     // Get current time in HH:MM format
     const hours = String(now.getHours()).padStart(2, '0');
     const minutes = String(now.getMinutes()).padStart(2, '0');
     const currentTime = `${hours}:${minutes}`;
-
-    // Add this right before the API call
-    console.log('Current date information:', {
-      formattedDate,
-      isoDate,
-      currentTime,
-      systemTime: new Date().toString()
-    });
-
-
+    
+    // Call OpenAI API to extract event details
     const response = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
@@ -60,18 +68,23 @@ async function extractEventDetails(text) {
           {
             role: 'system',
             content: `Extract calendar event details from the following text. 
-            Today's date is ${formattedDate} (${isoDate}) .
+            Today's date is ${formattedDate} (${isoDate}).
             The current time is ${currentTime}.
+            
             Return a JSON object with the following fields:
             - title: The title or name of the event
-            - date: The date in YYYY-MM-DD format. If "today" is mentioned, use ${isoDate}. If "tomorrow" is mentioned, calculate tomorrow's date.
+            - date: The date in YYYY-MM-DD format
             - start_time: Start time in HH:MM format (24-hour)
             - end_time: End time in HH:MM format (24-hour), can be null
             - location: Location of the event, can be null
             - attendees: Array of attendees, can be empty array
             
-            If no date is specified, assume today (${isoDate}).
-            If no time is specified, assume a default time of 09:00.`
+            If the text mentions "today", use ${isoDate}.
+            If the text mentions "tomorrow", calculate the date accordingly.
+            If no date is specified, assume today.
+            If no time is specified, assume a default time of 09:00.
+            
+            Return ONLY the JSON object, no other text.`
           },
           {
             role: 'user',
@@ -89,72 +102,125 @@ async function extractEventDetails(text) {
       }
     );
     
-    // Parse the response to extract the JSON object
-    const content = response.data.choices[0].message.content;
+    // Extract the JSON content from the response
+    const content = response.data.choices[0].message.content.trim();
+    
     try {
-      // Clean the content by removing markdown code block syntax
-      const cleanedContent = content.replace(/```(?:json)?\s*/g, '').replace(/```/g, '');
-      return JSON.parse(cleanedContent);
+      const eventDetails = JSON.parse(content);
+      res.json({ success: true, eventDetails });
     } catch (parseError) {
       console.error('Error parsing OpenAI response:', parseError);
       // Attempt to extract JSON-like content from the response
       const jsonMatch = content.match(/\{[\s\S]*\}/);
-      
       if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
+        const eventDetails = JSON.parse(jsonMatch[0]);
+        res.json({ success: true, eventDetails });
+      } else {
+        throw new Error('Failed to parse event details from response');
       }
-      throw new Error('Failed to parse event details from response');
     }
   } catch (error) {
     console.error('Error calling OpenAI API:', error.message);
     if (error.response) {
       console.error('Response data:', error.response.data);
     }
-    throw new Error('Failed to process natural language input');
-  }
-}
-
-// API endpoint to process natural language input
-app.post('/api/parse', async (req, res) => {
-  try {
-    const { text } = req.body;
-    
-    if (!text) {
-      return res.status(400).json({ error: 'Text input is required' });
-    }
-    
-    const eventDetails = await extractEventDetails(text);
-    res.json({ success: true, eventDetails });
-  } catch (error) {
-    console.error('Error in parse endpoint:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Failed to process natural language input' });
   }
 });
 
+// Google Auth endpoints
+app.get('/api/auth/google', (req, res) => {
+  // Generate a unique ID for this user session if not exists
+  if (!req.session.userId) {
+    req.session.userId = crypto.randomBytes(16).toString('hex');
+  }
+  
+  // Get auth URL from Google Calendar service
+  const { authUrl, state } = googleCalendarService.getAuthUrl();
+  
+  // Store state in session for verification
+  req.session.oauthState = state;
+  
+  // Redirect to Google's OAuth page
+  res.json({ authUrl });
+});
 
-// Create calendar event
-app.post('/api/calendar/create', async (req, res) => {
+// OAuth callback endpoint
+app.get('/api/auth/callback', async (req, res) => {
+  const { code, state } = req.query;
+  
+  // Verify state to prevent CSRF attacks
+  if (state !== req.session.oauthState) {
+    return res.status(403).send('Invalid state parameter');
+  }
+  
   try {
-    const result = await mockCalendarService.createEvent(req.body);
+    // Exchange code for tokens
+    const result = await googleCalendarService.getTokensFromCode(code, req.session.userId);
+    
+    if (result.success) {
+      // Mark user as authenticated
+      req.session.isAuthenticated = true;
+      
+      // Redirect to the main app
+      res.redirect('/');
+    } else {
+      res.status(500).send('Failed to authenticate with Google');
+    }
+  } catch (error) {
+    console.error('Auth callback error:', error);
+    res.status(500).send('Authentication error');
+  }
+});
+
+// Check auth status
+app.get('/api/auth/status', (req, res) => {
+  res.json({
+    isAuthenticated: !!(req.session.userId && req.session.isAuthenticated)
+  });
+});
+
+// Logout endpoint
+app.get('/api/auth/logout', (req, res) => {
+  req.session.destroy();
+  res.json({ success: true });
+});
+
+// Calendar API endpoints
+app.post('/api/calendar/create', isAuthenticated, async (req, res) => {
+  try {
+    const eventData = req.body;
+    
+    // Validate event data
+    if (!eventData.title || (!eventData.date && !eventData.start_time)) {
+      return res.status(400).json({ error: 'Invalid event data: Title and either date or time are required' });
+    }
+    
+    const result = await googleCalendarService.createEvent(req.session.userId, eventData);
     res.json(result);
   } catch (error) {
     console.error('Error creating event:', error);
-    res.status(500).json({ error: 'Failed to create calendar event' });
+    res.status(500).json({ error: 'Failed to create event' });
   }
 });
 
-// Get all calendar events
-app.get('/api/calendar/events', async (req, res) => {
+app.get('/api/calendar/events', isAuthenticated, async (req, res) => {
   try {
-    const events = await mockCalendarService.getEvents();
-    res.json({ events });
+    const options = {
+      timeMin: req.query.timeMin,
+      timeMax: req.query.timeMax,
+      maxResults: req.query.maxResults
+    };
+    
+    const result = await googleCalendarService.getEvents(req.session.userId, options);
+    res.json(result);
   } catch (error) {
     console.error('Error fetching events:', error);
-    res.status(500).json({ error: 'Failed to fetch calendar events' });
+    res.status(500).json({ error: 'Failed to fetch events' });
   }
 });
 
-app.put('/api/calendar/events/:id', async (req, res) => {
+app.put('/api/calendar/events/:id', isAuthenticated, async (req, res) => {
   try {
     const eventId = req.params.id;
     const eventData = req.body;
@@ -164,7 +230,7 @@ app.put('/api/calendar/events/:id', async (req, res) => {
       return res.status(400).json({ error: 'Invalid event data: Title and either date or time are required' });
     }
     
-    const result = await mockCalendarService.updateEvent(eventId, eventData);
+    const result = await googleCalendarService.updateEvent(req.session.userId, eventId, eventData);
     res.json(result);
   } catch (error) {
     console.error('Error updating event:', error);
@@ -172,19 +238,16 @@ app.put('/api/calendar/events/:id', async (req, res) => {
   }
 });
 
-
-
-app.delete('/api/calendar/events/:id', async (req, res) => {
+app.delete('/api/calendar/events/:id', isAuthenticated, async (req, res) => {
   try {
     const eventId = req.params.id;
-    const result = await mockCalendarService.deleteEvent(eventId);
+    const result = await googleCalendarService.deleteEvent(req.session.userId, eventId);
     res.json(result);
   } catch (error) {
     console.error('Error deleting event:', error);
     res.status(500).json({ error: 'Failed to delete event' });
   }
 });
-
 
 // Start the server
 app.listen(PORT, () => {

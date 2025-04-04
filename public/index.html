@@ -9,21 +9,20 @@
     body {
       font-family: Arial, sans-serif;
       line-height: 1.6;
+      margin: 0;
+      padding: 0;
+      color: #333;
+    }
+
+    .container {
       max-width: 800px;
       margin: 0 auto;
       padding: 20px;
     }
 
-    .container {
-      border: 1px solid #ddd;
-      border-radius: 5px;
-      padding: 20px;
-      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-    }
-
     h1 {
-      text-align: center;
-      color: #333;
+      color: #4285F4;
+      margin-bottom: 20px;
     }
 
     textarea {
@@ -32,22 +31,22 @@
       border: 1px solid #ddd;
       border-radius: 4px;
       height: 100px;
-      margin-bottom: 15px;
+      margin-bottom: 10px;
       font-size: 16px;
     }
 
     button {
-      background-color: #4CAF50;
+      background-color: #4285F4;
       color: white;
       border: none;
-      padding: 10px 15px;
+      padding: 10px 20px;
       border-radius: 4px;
       cursor: pointer;
       font-size: 16px;
     }
 
     button:hover {
-      background-color: #45a049;
+      background-color: #3367D6;
     }
 
     button:disabled {
@@ -55,38 +54,54 @@
       cursor: not-allowed;
     }
 
-    .result {
-      margin-top: 20px;
-      padding: 15px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      background-color: #f9f9f9;
+    .loading {
       display: none;
+      margin: 20px 0;
+    }
+
+    .error {
+      display: none;
+      color: #D32F2F;
+      background-color: #FFEBEE;
+      padding: 10px;
+      border-radius: 4px;
+      margin: 10px 0;
+    }
+
+    .result {
+      display: none;
+      background-color: #F5F5F5;
+      padding: 20px;
+      border-radius: 4px;
+      margin: 20px 0;
     }
 
     .result h3 {
       margin-top: 0;
-      color: #333;
+      color: #4285F4;
     }
 
-    .event-field {
-      margin-bottom: 10px;
+    .result p {
+      margin: 10px 0;
     }
 
-    .event-field label {
-      font-weight: bold;
-      display: inline-block;
-      width: 100px;
-    }
-
-    .loading {
-      text-align: center;
+    .calendar-view {
       display: none;
+      margin-top: 30px;
     }
 
-    .error {
-      color: red;
-      margin-top: 10px;
+    .filter-btn.active {
+      background-color: #4CAF50;
+      color: white;
+    }
+
+    #authButton {
+      background-color: #4CAF50;
+      display: none;
+      margin-bottom: 20px;
+    }
+
+    #appContainer {
       display: none;
     }
   </style>
@@ -96,76 +111,64 @@
   <div class="container">
     <h1>Natural Language Calendar Event Creator</h1>
 
-    <div>
-      <p>Enter your event description in natural language:</p>
-      <textarea id="eventText" placeholder="Example: Meeting with John tomorrow at 3pm"></textarea>
+    <!-- Auth Button -->
+    <button id="authButton">Connect to Google Calendar</button>
+
+    <!-- App Container -->
+    <div id="appContainer">
+      <p>Enter your event details in natural language, and we'll create a calendar event for you.</p>
+      <p>Examples:</p>
+      <ul>
+        <li>"Meeting with John tomorrow at 3pm"</li>
+        <li>"Lunch with Sarah at Cafe Deluxe on Friday at noon"</li>
+        <li>"Doctor appointment on March 15th at 10am"</li>
+      </ul>
+
+      <textarea id="eventText" placeholder="Enter event details in natural language..."></textarea>
       <button id="parseButton">Create Event</button>
-    </div>
 
-    <div class="loading" id="loadingIndicator">
-      <p>Processing your request...</p>
-    </div>
-
-    <div class="error" id="errorMessage"></div>
-
-    <div class="result" id="resultContainer">
-      <h3>Extracted Event Details</h3>
-      <div class="filter-buttons" style="margin-bottom: 15px;">
-        <button id="filterAll" class="filter-btn active"
-          style="margin-right: 10px; padding: 5px 10px; border-radius: 4px; border: 1px solid #ddd; cursor: pointer;">All
-          Events</button>
-        <button id="filterToday" class="filter-btn"
-          style="margin-right: 10px; padding: 5px 10px; border-radius: 4px; border: 1px solid #ddd; cursor: pointer;">Today</button>
-        <button id="filterWeek" class="filter-btn"
-          style="padding: 5px 10px; border-radius: 4px; border: 1px solid #ddd; cursor: pointer;">This Week</button>
+      <div id="loadingIndicator" class="loading">
+        Processing your request...
       </div>
 
-      <div class="event-field">
-        <label>Title:</label>
-        <span id="eventTitle"></span>
-      </div>
-      <div class="event-field">
-        <label>Date:</label>
-        <span id="eventDate"></span>
-      </div>
-      <div class="event-field">
-        <label>Start Time:</label>
-        <span id="eventStartTime"></span>
-      </div>
-      <div class="event-field">
-        <label>End Time:</label>
-        <span id="eventEndTime"></span>
-      </div>
-      <div class="event-field">
-        <label>Location:</label>
-        <span id="eventLocation"></span>
-      </div>
-      <div class="event-field">
-        <label>Attendees:</label>
-        <span id="eventAttendees"></span>
+      <div id="errorMessage" class="error"></div>
+
+      <div id="resultContainer" class="result">
+        <h3>Event Details</h3>
+        <p><strong>Title:</strong> <span id="eventTitle"></span></p>
+        <p><strong>Date:</strong> <span id="eventDate"></span></p>
+        <p><strong>Start Time:</strong> <span id="eventStartTime"></span></p>
+        <p><strong>End Time:</strong> <span id="eventEndTime"></span></p>
+        <p><strong>Location:</strong> <span id="eventLocation"></span></p>
+        <p><strong>Attendees:</strong> <span id="eventAttendees"></span></p>
+
+        <div style="margin-top: 20px;">
+          <button id="confirmButton">Confirm & Add to Calendar</button>
+          <button id="editButton" style="background-color: #FFA000;">Edit</button>
+        </div>
       </div>
 
-      <div style="margin-top: 20px;">
-        <button id="confirmButton">Confirm & Add to Calendar</button>
-        <button id="editButton">Edit Details</button>
+      <div class="calendar-view" id="calendarView">
+        <h3>Your Calendar Events</h3>
+
+        <!-- Filter Buttons -->
+        <div class="filter-buttons" style="margin-bottom: 15px;">
+          <button id="filterAll" class="filter-btn active"
+            style="margin-right: 10px; padding: 5px 10px; border-radius: 4px; border: 1px solid #ddd; cursor: pointer;">All
+            Events</button>
+          <button id="filterToday" class="filter-btn"
+            style="margin-right: 10px; padding: 5px 10px; border-radius: 4px; border: 1px solid #ddd; cursor: pointer;">Today</button>
+          <button id="filterWeek" class="filter-btn"
+            style="padding: 5px 10px; border-radius: 4px; border: 1px solid #ddd; cursor: pointer;">This Week</button>
+        </div>
+
+        <div id="eventsList"></div>
+        <button id="refreshEventsButton" style="margin-top: 20px;">Refresh Events</button>
       </div>
     </div>
   </div>
 
   <script src="app.js"></script>
-
-  <!-- Move this inside the body tag, right before the closing </body> tag -->
-  <div class="container">
-    <div class="calendar-view" id="calendarView" style="display: none; margin-top: 30px;">
-      <h3>Your Calendar Events</h3>
-      <div id="eventsList"></div>
-      <button id="refreshEventsButton">Refresh Events</button>
-    </div>
-  </div>
-
 </body>
-
-
-
 
 </html>

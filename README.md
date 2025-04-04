@@ -72,7 +72,7 @@ A simple web application that allows users to create calendar events using natur
 ## Project Structure
 
 ```
-calendar_mvp_simple/
+NLCEC/
 ├── public/                 # Frontend files
 │   ├── index.html          # Main HTML page
 │   └── app.js              # Frontend JavaScript
