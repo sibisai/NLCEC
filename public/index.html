@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Natural Language Calendar Event Creator</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      line-height: 1.6;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .container {
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      padding: 20px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+
+    h1 {
+      text-align: center;
+      color: #333;
+    }
+
+    textarea {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      height: 100px;
+      margin-bottom: 15px;
+      font-size: 16px;
+    }
+
+    button {
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      padding: 10px 15px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    button:hover {
+      background-color: #45a049;
+    }
+
+    button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+
+    .result {
+      margin-top: 20px;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background-color: #f9f9f9;
+      display: none;
+    }
+
+    .result h3 {
+      margin-top: 0;
+      color: #333;
+    }
+
+    .event-field {
+      margin-bottom: 10px;
+    }
+
+    .event-field label {
+      font-weight: bold;
+      display: inline-block;
+      width: 100px;
+    }
+
+    .loading {
+      text-align: center;
+      display: none;
+    }
+
+    .error {
+      color: red;
+      margin-top: 10px;
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>Natural Language Calendar Event Creator</h1>
+
+    <div>
+      <p>Enter your event description in natural language:</p>
+      <textarea id="eventText" placeholder="Example: Meeting with John tomorrow at 3pm"></textarea>
+      <button id="parseButton">Create Event</button>
+    </div>
+
+    <div class="loading" id="loadingIndicator">
+      <p>Processing your request...</p>
+    </div>
+
+    <div class="error" id="errorMessage"></div>
+
+    <div class="result" id="resultContainer">
+      <h3>Extracted Event Details</h3>
+      <div class="filter-buttons" style="margin-bottom: 15px;">
+        <button id="filterAll" class="filter-btn active"
+          style="margin-right: 10px; padding: 5px 10px; border-radius: 4px; border: 1px solid #ddd; cursor: pointer;">All
+          Events</button>
+        <button id="filterToday" class="filter-btn"
+          style="margin-right: 10px; padding: 5px 10px; border-radius: 4px; border: 1px solid #ddd; cursor: pointer;">Today</button>
+        <button id="filterWeek" class="filter-btn"
+          style="padding: 5px 10px; border-radius: 4px; border: 1px solid #ddd; cursor: pointer;">This Week</button>
+      </div>
+
+      <div class="event-field">
+        <label>Title:</label>
+        <span id="eventTitle"></span>
+      </div>
+      <div class="event-field">
+        <label>Date:</label>
+        <span id="eventDate"></span>
+      </div>
+      <div class="event-field">
+        <label>Start Time:</label>
+        <span id="eventStartTime"></span>
+      </div>
+      <div class="event-field">
+        <label>End Time:</label>
+        <span id="eventEndTime"></span>
+      </div>
+      <div class="event-field">
+        <label>Location:</label>
+        <span id="eventLocation"></span>
+      </div>
+      <div class="event-field">
+        <label>Attendees:</label>
+        <span id="eventAttendees"></span>
+      </div>
+
+      <div style="margin-top: 20px;">
+        <button id="confirmButton">Confirm & Add to Calendar</button>
+        <button id="editButton">Edit Details</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+
+  <!-- Move this inside the body tag, right before the closing </body> tag -->
+  <div class="container">
+    <div class="calendar-view" id="calendarView" style="display: none; margin-top: 30px;">
+      <h3>Your Calendar Events</h3>
+      <div id="eventsList"></div>
+      <button id="refreshEventsButton">Refresh Events</button>
+    </div>
+  </div>
+
+</body>
+
+
+
+
+</html>
