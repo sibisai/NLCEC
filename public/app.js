@@ -241,25 +241,28 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Function to format date in a more readable format
     function formatDate(dateStr) {
-        if (!dateStr) return 'Not specified';
+      if (!dateStr) return 'Not specified';
+      
+      try {
+        // Parse the date string
+        let date;
+        if (dateStr.includes('T')) {
+          // If it's an ISO string
+          date = new Date(dateStr);
+        } else {
+          // If it's just YYYY-MM-DD, create at noon to avoid timezone issues
+          const [year, month, day] = dateStr.split('-').map(Number);
+          date = new Date(year, month - 1, day, 12, 0, 0);
+        }
         
-        // Fix timezone issue by ensuring the date is interpreted in local timezone
-        // Add 'T00:00:00' to ensure it's treated as midnight in local timezone
-        const localDateStr = dateStr.includes('T') ? dateStr : `${dateStr}T00:00:00`;
-        
-        // Create date object and adjust for timezone if needed
-        const date = new Date(localDateStr);
         if (isNaN(date.getTime())) return dateStr; // Return original if invalid
         
-        // Force interpretation in local timezone by creating a new date with local components
-        const localDate = new Date(
-            date.getFullYear(),
-            date.getMonth(),
-            date.getDate()
-        );
-        
         const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-        return localDate.toLocaleDateString(undefined, options);
+        return date.toLocaleDateString(undefined, options);
+      } catch (e) {
+        console.error('Error formatting date:', e);
+        return dateStr;
+      }
     }
     
     // Function to display the extracted event details

@@ -44,6 +44,7 @@ app.post('/api/parse', async (req, res) => {
     
     // Get current date and time information
     const now = new Date();
+
     const dateFormatter = new Intl.DateTimeFormat('en-US', {
       weekday: 'long',
       year: 'numeric',
@@ -52,7 +53,13 @@ app.post('/api/parse', async (req, res) => {
     });
     
     const formattedDate = dateFormatter.format(now);
-    const isoDate = now.toISOString().split('T')[0];
+    // Get today's date in YYYY-MM-DD format in local timezone
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayISO = today.toISOString().split('T')[0];
+    // Get tomorrow's date
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowISO = tomorrow.toISOString().split('T')[0];
     
     // Get current time in HH:MM format
     const hours = String(now.getHours()).padStart(2, '0');
@@ -66,11 +73,13 @@ app.post('/api/parse', async (req, res) => {
         model: 'gpt-4o-mini',
         messages: [
           {
+           // Update the system content
             role: 'system',
             content: `Extract calendar event details from the following text. 
-            Today's date is ${formattedDate} (${isoDate}).
+            Today's date is ${formattedDate} (${todayISO}).
+            Tomorrow's date is ${tomorrowISO}.
             The current time is ${currentTime}.
-            
+
             Return a JSON object with the following fields:
             - title: The title or name of the event
             - date: The date in YYYY-MM-DD format
@@ -78,12 +87,12 @@ app.post('/api/parse', async (req, res) => {
             - end_time: End time in HH:MM format (24-hour), can be null
             - location: Location of the event, can be null
             - attendees: Array of attendees, can be empty array
-            
-            If the text mentions "today", use ${isoDate}.
-            If the text mentions "tomorrow", calculate the date accordingly.
-            If no date is specified, assume today.
+
+            If the text mentions "today", use ${todayISO}.
+            If the text mentions "tomorrow", use ${tomorrowISO}.
+            If no date is specified, assume today (${todayISO}).
             If no time is specified, assume a default time of 09:00.
-            
+
             Return ONLY the JSON object, no other text.`
           },
           {

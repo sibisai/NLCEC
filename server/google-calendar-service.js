@@ -84,14 +84,16 @@ class GoogleCalendarService {
       // Format start and end times
       const startDateTime = this._formatDateTime(eventData.date, eventData.start_time);
       let endDateTime;
-      
+
       if (eventData.end_time) {
         endDateTime = this._formatDateTime(eventData.date, eventData.end_time);
       } else {
         // Default to 1 hour duration if no end time specified
-        endDateTime = new Date(new Date(startDateTime).getTime() + 60 * 60 * 1000).toISOString();
+        const startDate = new Date(startDateTime);
+        const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+        endDateTime = endDate.toISOString();
       }
-      
+
       // Create event resource
       const event = {
         summary: eventData.title,
@@ -99,11 +101,11 @@ class GoogleCalendarService {
         description: eventData.notes || 'Created with Natural Language Calendar App',
         start: {
           dateTime: startDateTime,
-          timeZone: 'America/Los_Angeles', // You might want to make this configurable
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, // Use local timezone
         },
         end: {
           dateTime: endDateTime,
-          timeZone: 'America/Los_Angeles',
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, // Use local timezone
         },
         attendees: eventData.attendees 
           ? eventData.attendees
@@ -336,7 +338,15 @@ class GoogleCalendarService {
       time = '09:00';
     }
     
-    return `${date}T${time}:00`;
+    // Create a date object in local timezone
+    const [year, month, day] = date.split('-').map(Number);
+    const [hours, minutes] = time.split(':').map(Number);
+    
+    // Create date in local timezone (month is 0-indexed in JavaScript)
+    const dateObj = new Date(year, month - 1, day, hours, minutes, 0);
+    
+    // Format to ISO string
+    return dateObj.toISOString();
   }
 }
 
