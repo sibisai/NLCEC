@@ -1,4 +1,4 @@
-# Natural Language Calendar Event Creator
+# Talk2Calendar
 
 A simple web application that allows users to create calendar events using natural language input. This project uses OpenAI's API to parse natural language descriptions into structured event data.
 
